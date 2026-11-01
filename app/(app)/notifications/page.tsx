@@ -79,6 +79,7 @@ export default async function NotificationsPage() {
       title: n.title,
       message: n.body, // Mapping body to standard message field
       isRead: n.isRead,
+      referenceId: n.entityId, // Maps membershipId/entityId so InviteActions can render
       actionUrl:
         n.type === "MESSAGE" && n.entityId
           ? `/chat/${n.entityId}`
@@ -173,6 +174,10 @@ export default async function NotificationsPage() {
                     }
                   } catch (e) {
                     // Falls back to string format if not valid JSON
+                  }
+
+                  if (!isInvite && (n.title?.toLowerCase().includes("invitation") || n.message?.toLowerCase().includes("invited you"))) {
+                    isInvite = true;
                   }
 
                   return (

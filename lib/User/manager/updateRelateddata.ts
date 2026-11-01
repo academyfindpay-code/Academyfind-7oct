@@ -82,6 +82,7 @@ export async function updateInstituteBatches(instituteId: string, batches: any[]
         });
         
         revalidatePath(`/manager/${instituteId}/profile`);
+        revalidatePath(`/manager/${instituteId}/members`);
         return { success: true };
     } catch (error: any) {
         console.error("Batch Update Error:", error);
@@ -293,6 +294,7 @@ export async function updateFacultyMembers(instituteId: string, formData: FormDa
 
         // 3. Revalidate paths
         revalidatePath(`/manager/${instituteId}/profile`);
+        revalidatePath(`/manager/${instituteId}/members`);
         revalidatePath(`/af-ass-manage/institutes/${instituteId}`);
         const inst = await prisma.institute.findUnique({ where: { id: instituteId }, select: { slug: true } });
         if (inst?.slug) {

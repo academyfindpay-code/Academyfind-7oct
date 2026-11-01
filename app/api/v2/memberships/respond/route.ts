@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth/auth";
 import { headers } from "next/headers";
 import { creditWallet } from "@/lib/wallet/credit";
+import { revalidatePath } from "next/cache";
 
 export async function POST(req: Request) {
     try {
@@ -36,12 +37,12 @@ export async function POST(req: Request) {
                 if (membership.role === "STUDENT") {
                     await tx.studentInstituteRecord.updateMany({
                         where: { membershipId },
-                        data: { isVerified: true }
+                        data: { isVerified: true, isVisible: true }
                     });
                 } else if (membership.role === "TEACHER") {
                     await tx.teacherInstituteRecord.updateMany({
                         where: { membershipId },
-                        data: { isVerified: true }
+                        data: { isVerified: true, isVisible: true }
                     });
                 }
 
@@ -88,6 +89,22 @@ export async function POST(req: Request) {
                 data: { isRead: true }
             });
         });
+
+        // Revalidate profile and institute pages
+        const [inst, usr] = await Promise.all([
+            prisma.institute.findUnique({ where: { id: membership.instituteId }, select: { slug: true } }),
+            prisma.user.findUnique({ where: { id: session.user.id }, select: { username: true } })
+        ]);
+
+        revalidatePath(`/manager/${membership.instituteId}/members`);
+        revalidatePath(`/institute/${membership.instituteId}`);
+        if (inst?.slug) {
+            revalidatePath(`/institute/${inst.slug}`);
+            revalidatePath(`/institute/${membership.instituteId}-${inst.slug}`);
+        }
+        if (usr?.username) {
+            revalidatePath(`/u/${usr.username}`);
+        }
 
         return NextResponse.json({ success: true });
     } catch (error) {

@@ -2,6 +2,7 @@ import { addMemberToInstituteChannels } from "@/lib/chat/ensureInstituteChannels
 import { notifyUser } from "@/lib/notifications/notify";
 import { prisma } from "@/lib/prisma";
 import { creditWallet } from "@/lib/wallet/credit";
+import { revalidatePath } from "next/cache";
 
 export async function handleMembershipApproval(
   membershipId: string,
@@ -9,7 +10,10 @@ export async function handleMembershipApproval(
 ) {
   const membership = await prisma.instituteMembership.findUnique({
     where: { id: membershipId },
-    include: { institute: { select: { name: true } } },
+    include: {
+      institute: { select: { id: true, name: true, slug: true } },
+      user: { select: { id: true, username: true } },
+    },
   });
 
   if (!membership) throw new Error("Membership not found");
@@ -37,15 +41,15 @@ export async function handleMembershipApproval(
     });
 
     if (updated.role === "STUDENT") {
-      await tx.studentInstituteRecord.update({
+      await tx.studentInstituteRecord.updateMany({
         where: { membershipId },
-        data: { isVerified: true },
+        data: { isVerified: true, isVisible: true },
       });
     }
     if (updated.role === "TEACHER") {
-      await tx.teacherInstituteRecord.update({
+      await tx.teacherInstituteRecord.updateMany({
         where: { membershipId },
-        data: { isVerified: true },
+        data: { isVerified: true, isVisible: true },
       });
     }
     if (updated.role === "MANAGER") {
@@ -92,6 +96,17 @@ export async function handleMembershipApproval(
       approved.role,
     ),
   ]);
+
+  // Revalidate profiles and pages so status updates immediately
+  revalidatePath(`/manager/${approved.instituteId}/members`);
+  revalidatePath(`/institute/${approved.instituteId}`);
+  if (membership.institute.slug) {
+    revalidatePath(`/institute/${membership.institute.slug}`);
+    revalidatePath(`/institute/${approved.instituteId}-${membership.institute.slug}`);
+  }
+  if (membership.user?.username) {
+    revalidatePath(`/u/${membership.user.username}`);
+  }
 
   return approved;
 }

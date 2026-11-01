@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/getSession";
 import { notifyUserPush } from "@/lib/pushNotifications";
+import { revalidatePath } from "next/cache";
 
 export async function POST(req: Request) {
     try {
@@ -11,33 +12,101 @@ export async function POST(req: Request) {
         }
 
         const body = await req.json();
-        const { userId, instituteId, role } = body;
+        const { userId, instituteId, role, directAdd } = body;
 
         if (!userId || !instituteId || !role) {
             return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
         }
 
-        // Validate manager
+        // Validate manager or admin
         const managerCheck = await prisma.instituteManager.findUnique({
             where: {
                 userId_instituteId: { userId: session.user.id, instituteId }
             }
         });
         if (!managerCheck && session.user.role !== "ADMIN") {
-            return NextResponse.json({ error: "Unauthorized to invite" }, { status: 403 });
-        }
-
-        // Check if already member
-        const existing = await prisma.instituteMembership.findFirst({
-            where: { userId, instituteId }
-        });
-
-        if (existing) {
-            return NextResponse.json({ error: "User is already a member or has a pending request" }, { status: 400 });
+            return NextResponse.json({ error: "Unauthorized to manage institute members" }, { status: 403 });
         }
 
         const institute = await prisma.institute.findUnique({ where: { id: instituteId } });
         if (!institute) return NextResponse.json({ error: "Institute not found" }, { status: 404 });
+
+        const targetUser = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, name: true, username: true }
+        });
+        if (!targetUser) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+        const isDirect = Boolean(directAdd);
+
+        // Check if already member
+        const existing = await prisma.instituteMembership.findFirst({
+            where: { userId, instituteId, role: role as any }
+        });
+
+        if (existing) {
+            if (existing.status === "ACTIVE") {
+                return NextResponse.json({ error: "User is already an active member in this role." }, { status: 400 });
+            }
+
+            // If pending and manager chose directAdd, upgrade to ACTIVE immediately
+            if (isDirect) {
+                await prisma.$transaction(async (tx) => {
+                    await tx.instituteMembership.update({
+                        where: { id: existing.id },
+                        data: {
+                            status: "ACTIVE",
+                            isActive: true,
+                            joinedAt: new Date(),
+                        }
+                    });
+
+                    if (role === "STUDENT") {
+                        await tx.studentInstituteRecord.updateMany({
+                            where: { membershipId: existing.id },
+                            data: { isVerified: true, isVisible: true }
+                        });
+                    } else if (role === "TEACHER") {
+                        await tx.teacherInstituteRecord.updateMany({
+                            where: { membershipId: existing.id },
+                            data: { isVerified: true, isVisible: true }
+                        });
+                    }
+
+                    await tx.userNotification.create({
+                        data: {
+                            userId,
+                            type: "NOTICE",
+                            title: "Added to Institute",
+                            body: JSON.stringify({
+                                message: `You have been added as a ${role.toLowerCase()} at ${institute.name}.`,
+                                instituteId,
+                                role
+                            }),
+                            entityId: existing.id
+                        }
+                    });
+                });
+
+                const { ensureInstituteChannels, addMemberToInstituteChannels } = await import("@/lib/chat/ensureInstituteChannels");
+                await ensureInstituteChannels(instituteId);
+                await addMemberToInstituteChannels(userId, instituteId, role);
+
+                revalidatePath(`/manager/${instituteId}/members`);
+                revalidatePath(`/institute/${instituteId}`);
+                if (institute.slug) {
+                    revalidatePath(`/institute/${institute.slug}`);
+                    revalidatePath(`/institute/${instituteId}-${institute.slug}`);
+                }
+                if (targetUser.username) {
+                    revalidatePath(`/u/${targetUser.username}`);
+                }
+
+                return NextResponse.json({ success: true, message: "Member activated successfully!" });
+            }
+
+            return NextResponse.json({ error: "User already has a pending invitation/request." }, { status: 400 });
+        }
 
         // Ensure profile exists based on role
         let profileId = "";
@@ -64,8 +133,9 @@ export async function POST(req: Request) {
                     userId,
                     instituteId,
                     role: role as any,
-                    status: "PENDING",
-                    isActive: false,
+                    status: isDirect ? "ACTIVE" : "PENDING",
+                    isActive: isDirect,
+                    joinedAt: isDirect ? new Date() : null,
                 }
             });
 
@@ -76,7 +146,8 @@ export async function POST(req: Request) {
                         instituteId,
                         membershipId: membership.id,
                         courseName: "General",
-                        isVerified: false,
+                        isVerified: isDirect,
+                        isVisible: true,
                     }
                 });
             } else if (role === "TEACHER") {
@@ -87,7 +158,8 @@ export async function POST(req: Request) {
                         membershipId: membership.id,
                         designation: "Faculty",
                         teachingSubjects: [],
-                        isVerified: false,
+                        isVerified: isDirect,
+                        isVisible: true,
                     }
                 });
             }
@@ -97,10 +169,12 @@ export async function POST(req: Request) {
                 data: {
                     userId,
                     type: "NOTICE",
-                    title: "Institute Invitation",
+                    title: isDirect ? "Added to Institute" : "Institute Invitation",
                     body: JSON.stringify({
-                        message: `${institute.name} has invited you to join as a ${role.toLowerCase()}.`,
-                        invite: true,
+                        message: isDirect
+                            ? `You have been added as a ${role.toLowerCase()} at ${institute.name}.`
+                            : `${institute.name} has invited you to join as a ${role.toLowerCase()}.`,
+                        invite: !isDirect,
                         instituteId,
                         role
                     }),
@@ -109,14 +183,36 @@ export async function POST(req: Request) {
             });
         });
 
+        if (isDirect) {
+            const { ensureInstituteChannels, addMemberToInstituteChannels } = await import("@/lib/chat/ensureInstituteChannels");
+            await ensureInstituteChannels(instituteId);
+            await addMemberToInstituteChannels(userId, instituteId, role);
+        }
+
         notifyUserPush({
             userId,
-            title: `Invitation from ${institute.name} ✉️`,
-            body: `You have been invited to join ${institute.name} as a ${role.toLowerCase()}.`,
+            title: isDirect ? `Joined ${institute.name} 🎓` : `Invitation from ${institute.name} ✉️`,
+            body: isDirect
+                ? `You are now a registered ${role.toLowerCase()} of ${institute.name}.`
+                : `You have been invited to join ${institute.name} as a ${role.toLowerCase()}.`,
             data: { route: `/institute/${instituteId}` },
         }).catch(() => {});
 
-        return NextResponse.json({ success: true });
+        // Revalidate paths so teacher profile and institute pages update immediately
+        revalidatePath(`/manager/${instituteId}/members`);
+        revalidatePath(`/institute/${instituteId}`);
+        if (institute.slug) {
+            revalidatePath(`/institute/${institute.slug}`);
+            revalidatePath(`/institute/${instituteId}-${institute.slug}`);
+        }
+        if (targetUser.username) {
+            revalidatePath(`/u/${targetUser.username}`);
+        }
+
+        return NextResponse.json({
+            success: true,
+            message: isDirect ? `${role === "TEACHER" ? "Teacher" : "Student"} added directly!` : "Invitation sent!"
+        });
     } catch (error) {
         console.error("Invite error:", error);
         return NextResponse.json({ error: "Internal server error" }, { status: 500 });

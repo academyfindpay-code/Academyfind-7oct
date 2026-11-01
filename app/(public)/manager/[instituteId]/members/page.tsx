@@ -25,24 +25,7 @@ export default async function ManagerMembersPage({ params }: Props) {
   });
   if (!institute) notFound();
 
-  const subscriptionplan = institute.subscriptionPlan;
-
-  if (subscriptionplan === "BASIC" || subscriptionplan === "VERIFIED") {
-    return (
-      <div className="min-h-[500px] flex flex-col items-center justify-center text-center p-8 bg-stone-50/50 rounded-3xl border border-dashed border-stone-200">
-        <div className="w-16 h-16 bg-[#ebdbb7]/30 text-stone-800 rounded-full flex items-center justify-center mb-6">
-          <Lock className="w-8 h-8" />
-        </div>
-        <h2 className="text-2xl font-bold text-stone-800 mb-2">Student Leads Locked</h2>
-        <p className="text-stone-500 max-w-md mb-6">
-          Unlock direct student enquiries and lead generation. Upgrade to the <b>Premium</b> or <b>Elite </b> Plans to see who is trying to contact your academy.
-        </p>
-        <Link href={`/manager/${instituteId}/subscription`} className="bg-stone-800 hover:bg-stone-900 text-white px-6 py-2.5 rounded-xl font-medium transition">
-          View Upgrade Plans
-        </Link>
-      </div>
-    );
-  }
+  const isBasic = institute.subscriptionPlan === "BASIC";
 
   const [pending, students, teachers, customFaculty] = await Promise.all([
     prisma.instituteMembership.findMany({
@@ -128,10 +111,10 @@ export default async function ManagerMembersPage({ params }: Props) {
           >
             <UserPlus className="size-3.5 text-amber-700" /> Add Teacher (No Account)
           </a>
-          {(institute.subscriptionPlan === "BASIC" || institute.subscriptionPlan === "VERIFIED") ? (
+          {isBasic ? (
             <PremiumLock
               title="Invites Locked"
-              description="Upgrade to Premium to invite members."
+              description="Upgrade your plan to invite members."
               isSmall={true}
               instituteId={institute.id}
             />
@@ -318,7 +301,7 @@ export default async function ManagerMembersPage({ params }: Props) {
                 Teachers with an individual AcademyFind account who can log in, edit their profile, and receive 1-on-1 direct messages from students.
               </p>
             </div>
-            {(institute.subscriptionPlan === "BASIC" || institute.subscriptionPlan === "VERIFIED") ? null : (
+            {isBasic ? null : (
               <InviteMemberModal instituteId={instituteId} />
             )}
           </div>

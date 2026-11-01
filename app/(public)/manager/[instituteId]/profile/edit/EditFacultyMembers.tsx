@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import toast from "react-hot-toast";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +12,7 @@ import { GraduationCap, Plus, Trash2, Save, Image as ImageIcon, Loader2, BookOpe
 import { updateFacultyMembers } from "@/lib/User/manager/updateRelateddata";
 
 type FacultyMemberItem = {
+    _key: string;
     id?: string;
     name: string;
     designation: string;
@@ -34,14 +36,16 @@ interface RawFacultyData {
 export default function EditFacultyMembers({
     instituteId,
     currentFaculty = [],
-    maxLimit = 20,
+    maxLimit = 25,
 }: {
     instituteId: string;
     currentFaculty: RawFacultyData[];
     maxLimit?: number;
 }) {
+    const router = useRouter();
     const [items, setItems] = useState<FacultyMemberItem[]>(
-        (currentFaculty || []).map((f: RawFacultyData) => ({
+        (currentFaculty || []).map((f: RawFacultyData, idx: number) => ({
+            _key: f.id || `fac-${idx}-${Date.now()}`,
             id: f.id,
             name: f.name || "",
             designation: f.designation || "",
@@ -62,6 +66,7 @@ export default function EditFacultyMembers({
         setItems(prev => [
             ...prev,
             {
+                _key: `new-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                 name: "",
                 designation: "",
                 description: "",
@@ -118,7 +123,8 @@ export default function EditFacultyMembers({
 
             const result = await updateFacultyMembers(instituteId, formData);
             if (result.success) {
-                toast.success("Faculty & Teachers updated successfully!");
+                toast.success("Faculty & Teachers directory updated successfully!");
+                router.refresh();
             } else {
                 toast.error(result.error || "Failed to save faculty");
             }
@@ -145,7 +151,7 @@ export default function EditFacultyMembers({
                             </span>
                         </div>
                         <CardDescription className="text-xs text-stone-500 mt-1 max-w-xl">
-                            Add and display your teachers on your public institute profile & member directory. Teachers added here do not need an AcademyFind user account.
+                            Add and showcase your teachers directly on your public institute profile & member directory. You can add multiple teachers with photos, subjects, and experience.
                         </CardDescription>
                     </div>
                     <span className="inline-flex items-center self-start sm:self-auto rounded-full bg-amber-100/70 px-2.5 py-0.5 text-xs font-semibold text-amber-900 border border-amber-200/60">
@@ -177,11 +183,12 @@ export default function EditFacultyMembers({
                                 Registered Faculty Accounts
                             </p>
                             <p className="text-[11px] text-stone-600 mt-1 leading-relaxed">
-                                Teachers who hold an individual AcademyFind login account. They can receive 1-on-1 direct messages from students. Manage them via <strong>Invite Member</strong>.
+                                Teachers who hold an individual AcademyFind login account. They can receive 1-on-1 direct messages from students. Manage them via <strong>Add / Invite Faculty</strong>.
                             </p>
                         </div>
                     </div>
                 </div>
+
                 {items.length === 0 && (
                     <div className="text-center py-8 px-4 rounded-2xl border border-dashed border-stone-200 bg-stone-50/50">
                         <div className="w-12 h-12 mx-auto rounded-full bg-amber-50 border border-amber-200/60 flex items-center justify-center text-amber-700 mb-3">
@@ -189,7 +196,7 @@ export default function EditFacultyMembers({
                         </div>
                         <p className="text-sm font-semibold text-stone-700">No faculty members added yet</p>
                         <p className="text-xs text-stone-500 mt-1 max-w-sm mx-auto">
-                            Add your top educators, subject specialists, and mentors to increase student trust and enrollment.
+                            Add your educators, subject specialists, and mentors to increase student trust and enrollment.
                         </p>
                         <Button
                             type="button"
@@ -204,7 +211,7 @@ export default function EditFacultyMembers({
 
                 {items.map((it, idx) => (
                     <div
-                        key={it.id || idx}
+                        key={it._key}
                         className="border border-stone-200/80 rounded-2xl p-4 sm:p-5 bg-stone-50/80 relative flex flex-col md:flex-row gap-4 shadow-sm hover:border-amber-300 transition-colors"
                     >
                         <button
